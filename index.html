@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Tarot AR - Starry Dark Oracle</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Times New Roman', serif; color: #fff; }
+        
+        #input-video { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            object-fit: cover; opacity: 0; z-index: -10; pointer-events: none; 
+            transform: scaleX(-1); 
+        } 
+        
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
+        
+        #guide-text {
+            position: absolute; width: 100%; text-align: center;
+            color: #fff; letter-spacing: 3px; font-weight: normal;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.5); pointer-events: none;
+            transition: opacity 0.5s; text-transform: uppercase;
+            font-size: 0.7rem; bottom: 5%; 
+        }
+
+        #counter {
+            position: absolute; top: 30px; right: 40px;
+            font-size: 1.2rem; color: #fff; font-weight: bold;
+            border: 1px solid rgba(255, 255, 255, 0.5); padding: 5px 20px; border-radius: 30px;
+            background: rgba(0, 0, 0, 0.3); backdrop-filter: blur(5px);
+        }
+
+        #mode-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 50; display: flex; justify-content: center; align-items: center;
+        }
+        .mode-box { text-align: center; border: 1px solid #fff; padding: 50px; background: #0a0a0a; }
+        .mode-box h2 { letter-spacing: 5px; margin-bottom: 30px; font-weight: normal; font-family: 'Times New Roman', serif; }
+        .mode-box button {
+            display: block; width: 280px; margin: 15px auto; padding: 15px;
+            background: transparent; border: 1px solid #fff; color: #fff;
+            cursor: pointer; font-family: 'Times New Roman', serif; letter-spacing: 2px; transition: 0.3s;
+        }
+        .mode-box button:hover { background: #fff; color: #000; box-shadow: 0 0 20px #fff; }
+
+        #result-modal {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 85%; max-width: 600px; max-height: 80vh;
+            overflow-y: auto; background: rgba(5, 5, 5, 0.98); 
+            border: 1px solid #d4af37; padding: 35px; 
+            display: none; z-index: 9999; pointer-events: auto;
+            -webkit-overflow-scrolling: touch; border-radius: 4px; outline: none;
+            font-family: 'Times New Roman', serif;
+        }
+        
+        .reading-section { margin-bottom: 40px; border-bottom: 1px solid #222; padding-bottom: 20px; animation: fadeIn 0.6s ease-out; }
+        .reading-label { color: #888; font-size: 0.7rem; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 15px; display: block;}
+        .reading-body { display: flex; gap: 30px; align-items: start; }
+        .reading-img { width: 110px; border-radius: 2px; }
+        .reading-desc { color: #ccc; line-height: 1.7; font-size: 1rem; text-align: justify; }
+
+        button.restart-btn { 
+            display: block; margin: 40px auto 0; padding: 15px 50px; 
+            background: transparent; border: 1px solid #fff; color: #fff; 
+            cursor: pointer; text-transform: uppercase; font-size: 0.9rem; transition: 0.5s;
+            font-family: 'Times New Roman', serif !important;
+        }
+        button.restart-btn:hover { background: #fff; color: #000; }
+
+        #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 100; display: flex; justify-content: center; align-items: center; }
+        
+        #virtual-cursor {
+            position: absolute; width: 30px; height: 30px;
+            border: 2px solid #fff; border-radius: 50%;
+            transform: translate(-50%, -50%); pointer-events: none;
+            z-index: 100; display: none;
+            box-shadow: 0 0 20px rgba(255,255,255,0.8), inset 0 0 10px rgba(255,255,255,0.4);
+            background: rgba(255, 255, 255, 0.15);
+        }
+        #virtual-cursor.pinching { background: #fff; transform: translate(-50%, -50%) scale(0.6); box-shadow: 0 0 40px #fff; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+
+    <script src="data.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <video id="input-video" playsinline autoplay muted></video>
+    <div id="canvas-container"></div>
+    <div id="virtual-cursor"></div>
+    
+    <div id="ui-layer">
+        <div id="counter">0 / 0</div>
+        <div id="guide-text">Đang kết nối tâm linh...</div>
+        
+        <div id="result-modal" tabindex="-1">
+            <h2 style="text-align: center; font-size: 2.5rem; letter-spacing: 8px; padding-left: 8px; color: #d4af37; font-weight: normal;">LỜI TIÊN TRI</h2>
+            <div id="final-reading"></div>
+            <button class="restart-btn" onclick="resetGame()">Trải Bài Mới</button>
+        </div>
+    </div>
+
+    <div id="loading">
+        <div style="letter-spacing: 5px; font-size: 0.8rem; font-family: 'Times New Roman', serif;">✦ LOADING ✦</div>
+    </div>
+
+    <div id="mode-overlay" style="display:none;">
+        <div class="mode-box">
+            <h2>CHỌN TRẢI BÀI</h2>
+            <button onclick="startGame(1)">✦ MỘT LÁ (Daily Message) ✦</button>
+            <button onclick="startGame(3)">✦ BA LÁ (Past - Present - Future) ✦</button>
+        </div>
+    </div>
+
+    <script>
+        const TAROT_DATA = TAROT_DATABASE;
+        const CONFIG = {
+            cardCount: TAROT_DATA.length, 
+            radius: 15.0, 
+            cardWidth: 1.4, cardHeight: 2.4, 
+            inspectPos: { x: 0, y: 0, z: 3.8 }, 
+            inspectScale: 0.45, storageScale: 0.08, storageZ: 3.5, 
+            storeMarginX: 0.15, storeMarginTop: 1.1, storeGapY: 0.28 
+        };
+
+        const bgMusic = new Audio('ambient.mp3');
+        bgMusic.loop = true;
+        bgMusic.volume = 0.4;
+        let musicStarted = false;
+
+        function startMusic() {
+            if (!musicStarted) {
+                bgMusic.play().then(() => {
+                    musicStarted = true;
+                }).catch(e => console.log("Chờ tương tác mạnh hơn để phát nhạc"));
+            }
+        }
+
+        let scene, camera, renderer, cardGroup, textureLoader, starField;
+        let raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
+        let storedCards = [], inspectingCard = null, isGameActive = false;
+        let gameMode = 3, camInstance = null, handX = 0.5, rotationSpeed = 0, wristTilt = 0, isPinching = false;
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.015);
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
+            camera.position.set(0, 0, 5);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000, 1);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            textureLoader = new THREE.TextureLoader();
+            
+            createStars();
+            createCards();
+            
+            setTimeout(() => {
+                document.getElementById('loading').style.opacity = 0;
+                setTimeout(() => {
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('mode-overlay').style.display = 'flex';
+                }, 800);
+            }, 1500);
+
+            document.addEventListener('mousedown', onMouseDown);
+            window.addEventListener('resize', onResize);
+        }
+
+        function createStars() {
+            const starGeometry = new THREE.BufferGeometry();
+            const starMaterial = new THREE.PointsMaterial({ 
+                color: 0xffffff, 
+                size: 0.15, 
+                transparent: true, 
+                opacity: 0.8,
+                depthWrite: false,
+                depthTest: true
+            });
+
+            const starVertices = [];
+            for (let i = 0; i < 2000; i++) {
+                const r = 40 + Math.random() * 40;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos((Math.random() * 2) - 1);
+
+                const x = r * Math.sin(phi) * Math.cos(theta);
+                const y = r * Math.sin(phi) * Math.sin(theta);
+                const z = r * Math.cos(phi);
+
+                starVertices.push(x, y, z);
+            }
+
+            starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+            starField = new THREE.Points(starGeometry, starMaterial);
+
+            starField.renderOrder = -10; 
+    
+            scene.add(starField);
+        }
+
+        function createCards() {
+            cardGroup = new THREE.Group();
+            scene.add(cardGroup);
+            const geo = new THREE.BoxGeometry(CONFIG.cardWidth, CONFIG.cardHeight, 0.02);
+            const backTex = textureLoader.load('back.png');
+            const matEdge = new THREE.MeshStandardMaterial({ color: 0x111111 }); 
+
+            TAROT_DATA.forEach((data, i) => {
+                const matFront = new THREE.MeshStandardMaterial({ map: textureLoader.load(data.url) });
+                const materials = [matEdge, matEdge, matEdge, matEdge, new THREE.MeshStandardMaterial({map: backTex}), matFront];
+                const card = new THREE.Mesh(geo, materials);
+        
+                const angle = (i / CONFIG.cardCount) * Math.PI * 2;
+                card.position.set(Math.sin(angle) * CONFIG.radius, 0, Math.cos(angle) * CONFIG.radius);
+
+                card.lookAt(0, 0, 0);
+
+                card.userData = { 
+                    id: i, 
+                    data: data, 
+                    isPicked: false,
+                    initialRotation: { x: card.rotation.x, y: card.rotation.y, z: card.rotation.z }
+                }; 
+        
+                cardGroup.add(card);
+            });
+        }
+
+        function startGame(mode) {
+            startMusic();
+            gameMode = mode;
+            isGameActive = true;
+            document.getElementById('mode-overlay').style.display = 'none';
+            document.getElementById('canvas-container').style.pointerEvents = "auto";
+            updateCounter();
+            if (!musicStarted) {
+                bgMusic.play().catch(e => console.log("Music blocked by browser"));
+                musicStarted = true;
+            }
+            shuffleArray(TAROT_DATA);
+            if (camInstance) camInstance.start();
+        }
+
+        function resetGame() {
+            document.getElementById('result-modal').style.display = 'none';
+
+            const modeOverlay = document.getElementById('mode-overlay');
+            modeOverlay.style.display = 'flex';
+            modeOverlay.style.opacity = 1;
+
+            storedCards.forEach(card => {
+                card.userData.isPicked = false;
+                cardGroup.add(card);
+
+                const angle = (card.userData.id / CONFIG.cardCount) * Math.PI * 2;
+                const oldPos = {
+                    x: Math.sin(angle) * CONFIG.radius,
+                    y: 0,
+                    z: Math.cos(angle) * CONFIG.radius
+                };
+
+                new TWEEN.Tween(card.position).to(oldPos, 1000).easing(TWEEN.Easing.Cubic.Out).start();
+
+                new TWEEN.Tween(card.rotation).to({
+                    x: card.userData.initialRotation.x,
+                    y: card.userData.initialRotation.y,
+                    z: card.userData.initialRotation.z
+                }, 1000).easing(TWEEN.Easing.Cubic.Out).start();
+
+                new TWEEN.Tween(card.scale).to({ x: 1, y: 1, z: 1 }, 1000).start();
+            });
+
+            storedCards = [];
+            inspectingCard = null;
+            isGameActive = false;
+            if (camInstance) camInstance.stop();
+
+            document.getElementById('counter').innerText = `0 / 0`;
+            document.getElementById('counter').style.opacity = 1;
+            document.getElementById('guide-text').innerText = "Vòng xoay định mệnh đang chờ đợi...";
+            document.getElementById('guide-text').style.opacity = 1;
+
+            document.getElementById('canvas-container').style.pointerEvents = "auto";
+        }
+
+        function onResults(results) {
+            if (!isGameActive) return;
+            const cursor = document.getElementById('virtual-cursor');
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const lm = results.multiHandLandmarks[0];
+                wristTilt = (lm[17].y - lm[5].y) * 10; 
+                handX = 1 - lm[9].x; 
+                const screenX = (1 - (lm[8].x + lm[4].x) / 2) * window.innerWidth;
+                const screenY = ((lm[8].y + lm[4].y) / 2) * window.innerHeight;
+                cursor.style.display = 'block'; cursor.style.left = `${screenX}px`; cursor.style.top = `${screenY}px`;
+
+                const isPinchingNow = Math.hypot(lm[8].x - lm[4].x, lm[8].y - lm[4].y) < 0.07; 
+                if (isPinchingNow && !isPinching && storedCards.length < gameMode && !inspectingCard) {
+                    cursor.classList.add('pinching');
+                    raycaster.setFromCamera({x: (screenX/window.innerWidth)*2-1, y: -(screenY/window.innerHeight)*2+1}, camera);
+                    const intersects = raycaster.intersectObjects(cardGroup.children);
+                    if (intersects.length > 0) pickCard(intersects[0].object);
+                } else if (!isPinchingNow) cursor.classList.remove('pinching');
+                isPinching = isPinchingNow;
+            } else { cursor.style.display = 'none'; wristTilt = 0; }
+        }
+
+        function pickCard(card) {
+            card.userData.isPicked = true;
+            card.userData.isReversed = Math.random() > 0.5;
+            inspectingCard = card;
+            scene.attach(card);
+            const targetRot = { x: 0, y: Math.PI, z: card.userData.isReversed ? Math.PI : 0 };
+            new TWEEN.Tween(card.position).to(CONFIG.inspectPos, 400).easing(TWEEN.Easing.Quartic.Out).start();
+            new TWEEN.Tween(card.rotation).to(targetRot, 400).easing(TWEEN.Easing.Back.Out).start();
+            new TWEEN.Tween(card.scale).to({ x: CONFIG.inspectScale, y: CONFIG.inspectScale, z: CONFIG.inspectScale }, 400)
+                .onComplete(() => { setTimeout(storeCard, 500); }).start();
+        }
+
+        function storeCard() {
+            if (!inspectingCard) return;
+            const card = inspectingCard; storedCards.push(card); inspectingCard = null;
+            const dist = camera.position.z - CONFIG.storageZ;
+            const vH = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * dist;
+            const vW = vH * camera.aspect;
+            const pos = { x: -vW / 2 + CONFIG.storeMarginX, y: vH / 2 - CONFIG.storeMarginTop - (storedCards.length - 1) * CONFIG.storeGapY, z: CONFIG.storageZ };
+            new TWEEN.Tween(card.position).to(pos, 400).easing(TWEEN.Easing.Exponential.Out).start();
+            new TWEEN.Tween(card.scale).to({ x: CONFIG.storageScale, y: CONFIG.storageScale, z: CONFIG.storageScale }, 400).start();
+            updateCounter();
+        }
+
+        function updateCounter() {
+            document.getElementById('counter').innerText = `${storedCards.length} / ${gameMode}`;
+            if (storedCards.length === gameMode) setTimeout(revealReading, 800);
+        }
+
+        function revealReading() {
+            isGameActive = false;
+            document.getElementById('canvas-container').style.pointerEvents = "none";
+            document.getElementById('virtual-cursor').style.display = "none";
+            const modal = document.getElementById('result-modal');
+            modal.style.display = 'block';
+            requestAnimationFrame(() => { modal.focus(); modal.scrollTop = 0; });
+
+            const content = document.getElementById('final-reading');
+            let labels = gameMode === 1 ? ["THÔNG ĐIỆP DÀNH CHO BẠN"] : ["QUÁ KHỨ", "HIỆN TẠI", "TƯƠNG LAI"];
+            let html = "";
+            storedCards.forEach((c, i) => {
+                const d = c.userData.data;
+                const isR = c.userData.isReversed;
+                html += `<div class="reading-section"><span class="reading-label">✦ ${labels[i]}</span><div class="reading-body"><img src="${d.url}" class="reading-img" style="${isR ? 'transform:rotate(180deg)' : ''}"><div class="reading-content"><h3 style="font-weight:normal;">${d.name} ${isR ? '(Ngược)' : '(Xuôi)'}</h3><p class="reading-desc">${isR ? d.reversed : d.upright}</p></div></div></div>`;
+            });
+            content.innerHTML = html;
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate); 
+            TWEEN.update(time);
+            if (isGameActive) {
+                let targetSpeed = (handX - 0.5) * 0.15;
+                if (wristTilt > 0.5) targetSpeed *= (1 + wristTilt * 2);
+                else if (wristTilt < -0.5) targetSpeed *= (1 + wristTilt * 0.8);
+                rotationSpeed += (targetSpeed - rotationSpeed) * 0.1;
+                cardGroup.rotation.y += rotationSpeed;
+                starField.rotation.y += 0.0003;
+                cardGroup.children.forEach((c, i) => { if(!c.userData.isPicked) c.position.y = Math.sin(time * 0.0015 + i) * 0.15; });
+            }
+            renderer.render(scene, camera);
+        }
+
+        function onMouseDown(event) {
+            if (!isGameActive || storedCards.length >= gameMode || inspectingCard) return;
+            raycaster.setFromCamera({x: (event.clientX/window.innerWidth)*2-1, y: -(event.clientY/window.innerHeight)*2+1}, camera);
+            const intersects = raycaster.intersectObjects(cardGroup.children);
+            if (intersects.length > 0) pickCard(intersects[0].object);
+        }
+
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        init(); animate();
+
+        const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+        hands.onResults(onResults);
+        camInstance = new Camera(document.getElementById('input-video'), {
+            onFrame: async () => { await hands.send({image: document.getElementById('input-video')}); },
+            width: 640, height: 480
+        });
+    </script>
+</body>
+</html>
