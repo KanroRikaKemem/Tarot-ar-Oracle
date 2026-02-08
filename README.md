@@ -1,1 +1,1 @@
-# tarot-ar-oracle
+# Tarot-ar-Oracle
